@@ -4,13 +4,13 @@
 * Start Date	: 30-Dec-1996
 * Author	: Solo/GeNeTiC
 *
-* Binary Version: 1.20
-* Source Version: 1.20 (opensource release)
+* Binary Version: 1.20b
+* Source Version: 1.20b (opensource release)
 * Project	: Asm-Pro (OpenSource Edition)
 *
 * Updates/People contributing to the opensource release:
 *
-* 17-Dec-2023 : v1.20
+* 22-Dec-2023 : v1.20b
 * 27-Dec-2022 : v1.19
 * - amigo/binary
 *
@@ -116,7 +116,7 @@ VERSION_NUM	EQU	256*1+20	; 256*major+minor
 version: macro
 	dc.b	'V1.20'
 	endm
-subversion	EQU	' '
+subversion	EQU	'b'
 
 DSIZE			=	128	; directory buffer
 FCHARS			=	30	; filename
@@ -356,7 +356,7 @@ HaveKS2:
 	jsr	(_LVODupLock,a6)
 	move.l	d0,(CurrentDir-DT,a4)
 
-	lea	(AsmPro.MSG,pc),a0
+	lea	(AsmPro.MSG-DT,a4),a0
 	move.l	a0,d1
 	moveq	#0,d2				; normal priority
 	lea	(ProgStart-4,pc),a0
@@ -465,8 +465,6 @@ DosLibName:
 NeedKS2Msg:
 	DC.B	'Sorry, Asm-Pro requires Kickstart 2.04 or higher!',10,0
 .End
-AsmPro.MSG:
-	DC.B	'Asm-Pro',0
 
 	EVEN
 ConvTabel3:	;0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f
@@ -5547,7 +5545,6 @@ Asmbl_Optimize:
 	jsr	(DEBUG_CLEAR_BP_BUFFER).l
 
 	clr.b	(IDNT_STRING-DT,a4)
-	clr.b	(INCLUDE_DIRECTORY-DT,a4)
 	sf	(Asm_HaveWatches-DT,a4)
 	asr	(IncludeAssignStatus-DT,a4)	; check again if no assign
 	move.b	(CurrentSource-DT,a4),d0
@@ -5678,6 +5675,7 @@ ASSEMBLERAWFILE:
 	moveq	#0,d0
 	move.b	d0,(BASEREG_BYTE-DT,a4)
 	move.l	d0,(DATA_CURRENTLINE-DT,a4)
+	move.b	d0,(INCLUDE_DIRECTORY-DT,a4)	; the same initial path for each pass
 	move.l	(sourcestart-DT,a4),a6
 	move.l	sp,(TEMP_STACKPTR-DT,a4)
 	lea	(.loopje,pc),a0
@@ -32315,7 +32313,7 @@ com_asmone_meminfo:
 	move.l	#Disasm_END,d2
 	bsr.b	C13C0C
 
-	move.l	#Error_Msg_Table,d1	; data+bss
+	move.l	#DATA_START,d1		; data+bss
 	move.l	#EndVarBase,d2
 	bsr.b	C13C0C
 
@@ -35688,7 +35686,6 @@ EqualAreas.MSG:		dc.b	'Equal areas',0			; ***
 Not.MSG:		dc.b	'Not '
 Found.MSG:		dc.b	'Found',0
 BranchForcedt.MSG:	dc.b	'Branch forced to word size',0	; ***
-BranchForcedt.MSG0:	dc.b	'Branch forced to long size',0	; ***
 FPCR.MSG:		dc.b	'FPCR= ',0
 FPIAR.MSG:		dc.b	'FPIAR=',0
 FPSR.MSG:		dc.b	'FPSR= ',0
@@ -35905,12 +35902,8 @@ DoubleSemicol:
 	dc.b	';;',0
 trackdiskdevi.MSG:
 	dc.b	'trackdisk.device',0
-TimerName:
-	dc.b	'timer.device',0
-AsmProV128.MSG:
-	dc.b	'Asm-Pro '
-	version
-	dc.b	0
+;TimerName:
+;	dc.b	'timer.device',0
 ExternalLevel.MSG:
 	dc.b	10
 	dc.b	'** External level 7 break **',0	; ***
@@ -36270,22 +36263,30 @@ JOIN_INCDIR_INCNAME_TO_INPUTBUFFER:
 
 JOIN_A1_INCNAME_TO_INPUTBUFFER:
 	lea	(CurrentAsmLine-DT,a4),a0
+	tst.b	(a1)		; a1 path empty?
+	beq.b	.AppendIncPath
 	lea	(SourceCode-DT,a4),a3
-	tst.b	(a1)		; need at least 1 char to check for : or /
-	beq.b	.lopje2
-.lopje1:
+.CheckIfAbs
+	move.b	(a3)+,d0	; is include path absolute?
+	beq.b	.CopyIncDir
+	cmp.b	#':',d0
+	beq.b	.AppendIncPath
+	bra.b	.CheckIfAbs
+.CopyIncDir
 	move.b	(a1)+,(a0)+
-	bne.b	.lopje1
+	bne.b	.CopyIncDir
 	subq.w	#2,a0
 	move.b	(a0)+,d0	; last incdir char
-	cmp.b	#':',d0
-	beq.b	.lopje2
+	cmp.b	#':',d0		; check for trailing : or /
+	beq.b	.AppendIncPath
 	cmp.b	#'/',d0
-	beq.b	.lopje2
-	move.b	#'/',(a0)+
-.lopje2:
+	beq.b	.AppendIncPath
+	move.b	#'/',(a0)+	; append / to incdir path
+.AppendIncPath
+	lea	(SourceCode-DT,a4),a3
+.CopyIncPath
 	move.b	(a3)+,(a0)+
-	bne.b	.lopje2
+	bne.b	.CopyIncPath
 	rts
 
 IsIncFileCached:
@@ -39304,27 +39305,25 @@ C18E00:
 	add.b	#'0',d1
 	move.b	d1,(a1)+
 	dbra	d7,C18DEC
+
+van_string_2_d1_done:
 	rts
 
 van_string_2_d1:
-.lopje:
 	moveq	#0,d0
-	move.b	(a6)+,d0
-	beq.b	.klaarnr
+.lopje	move.b	(a6)+,d0
+	beq.b	van_string_2_d1_done
 	cmp.b	#10,d0
-	beq.b	.klaarnr
+	beq.b	van_string_2_d1_done
 	cmp.b	#'|',d0
-	beq.b	.klaarnr
+	beq.b	van_string_2_d1_done
 	sub.b	#'0',d0
 	cmp.b	#10,d0
 	blt.b	.dec
-	subq.b	#7,d0
-.dec:
-	lsl.l	#4,d1
+	subq.b	#'A'-'9'-1,d0
+.dec	lsl.l	#4,d1
 	add.l	d0,d1
 	bra.b	.lopje
-.klaarnr:
-	rts
 
 addword2pf:
 	swap	d0
@@ -39421,7 +39420,7 @@ initmydirs:
 	moveq	#11-1,d1
 .lopje:
 	lea	(HomeDirectory-DT,a4),a0
-	moveq	#128-1,d0
+	moveq	#DSIZE-1,d0
 .lopje2:
 	move.b	(a0)+,(a1)+
 	dbf	d0,.lopje2
@@ -39593,23 +39592,7 @@ memtypeensize:
 
 	addq.l	#2,a6
 	moveq	#0,d1
-.lopje:
-	moveq	#0,d0
-	move.b	(a6)+,d0
-	beq.b	.klaarnr
-	cmp.b	#10,d0
-	beq.b	.klaarnr
-	cmp.b	#'|',d0
-	beq.b	.klaarnr
-	sub.b	#'0',d0
-	cmp.b	#9,d0
-	ble.b	.dec
-	subq.b	#7,d0
-.dec:
-	lsl.l	#4,d1
-	add.l	d0,d1
-	bra.b	.lopje
-.klaarnr:
+	bsr	van_string_2_d1
 	move.l	d1,(_memamount-DT,a4)
 
 .geenmem:
@@ -45899,14 +45882,14 @@ PW_IR:	DC.L	GT_VisualInfo,0,GTBB_Recessed,1,TAG_DONE
 OpenLoginWindow:
 	move.l	4.w,a6
 	lea	(LoginGTags,pc),a2
-	move.l	#$7fff,d2	; 32mb is max
+	move.l	#$7fff,d2	; 32mb is max due to UI
 	moveq	#10,d3		; bytes to kb
 
 	move.l	#$20001,d1	; largest public
 	jsr	(_LVOAvailMem,a6)	; ***
 	lsr.l	d3,d0
 	cmp.l	d2,d0
-	blo.s	.noprobs3
+	blo.b	.noprobs3
 	move.l	d2,d0
 .noprobs3:
 	move.l	d0,(_pubmax-DT,a4)
@@ -45915,7 +45898,7 @@ OpenLoginWindow:
 	jsr	(_LVOAvailMem,a6)	; ***
 	lsr.l	d3,d0
 	cmp.l	d2,d0
-	blo.s	.noprobs2
+	blo.b	.noprobs2
 	move.l	d2,d0
 .noprobs2:
 	move.l	d0,(_absmax-DT,a4)
@@ -45930,7 +45913,7 @@ OpenLoginWindow:
 	jsr	(_LVOAvailMem,a6)	; ***
 	lsr.l	d3,d0
 	cmp.l	d2,d0
-	blo.s	.noprobs
+	blo.b	.noprobs
 	move.l	d2,d0
 .noprobs:
 	lea	(_memorytypeLabels,pc),a0
@@ -45963,7 +45946,7 @@ OpenLoginWindow:
 
 	moveq	#1,d2
 	cmp.w	#3,d0
-	bne.s	.notabs
+	bne.b	.notabs
 	moveq	#0,d2
 .notabs
 	move.l	d2,(_absolute_adrTags+4-LoginGTags,a2)
@@ -45996,7 +45979,7 @@ OpenLoginWindow:
 
 	bsr	OpenTheLoginWindow
 	tst.w	d0
-	bne.s	li_erroropenwin
+	bne.b	li_erroropenwin
 li_waitbeforclose:
 	move.l	(DosBase-DT,a4),a6
 	moveq	#4,d1		;delay
@@ -46007,16 +45990,16 @@ li_waitbeforclose:
 	move.l	(wd_UserPort,a0),a0
 	jsr	_LVOGT_GetIMsg(a6)
 	tst.l	d0
-	beq.s	li_nointuiactivity
+	beq.b	li_nointuiactivity
 	bsr.b	li_processmsg
 
 	tst.w	d0		;leave now !!!
-	bne.s	li_exit
+	bne.b	li_exit
 
 li_nointuiactivity:
 	IF Debugstuff
 	btst	#7,$bfe001			; WHAT'S THAT !!!
-	bne.s	li_waitbeforclose
+	bne.b	li_waitbeforclose
 	ELSE
 	bra.b	li_waitbeforclose
 	ENDIF
@@ -46034,7 +46017,7 @@ li_exit:
 	lea	(_absmax-DT,a4),a0
 	move.l	(_memamount-DT,a4),d1
 	cmp.l	(a0,d0.w),d1
-	bls.s	.nixmis
+	bls.b	.nixmis
 	move.l	(a0,d0.w),(_memamount-DT,a4)
 .nixmis:	
 
@@ -46052,20 +46035,19 @@ memstuff2:
 ;************ check the messies ***********
 
 li_processmsg:
-	move.l	d0,a2
-	move.l	(im_Class,a2),d2
+	move.l	d0,a1
+	move.l	(im_Class,a1),d2
 	moveq	#0,d3
-	move.w	(im_Code,a2),d3
+	move.w	(im_Code,a1),d3
+	move.l	(im_IAddress,a1),a2		; gadget
 
 	move.l	(GadToolsBase-DT,a4),a6
-	move.l	a2,a1
 	jsr	_LVOGT_ReplyIMsg(a6)
 
 	moveq	#IDCMP_GADGETDOWN!IDCMP_GADGETUP,d1
 	and.l	d2,d1
 	beq.b	.CheckKeys
-	move.l	(im_IAddress,a2),a1		; gadget
-	move.w	(gg_GadgetID,a1),d4
+	move.w	(gg_GadgetID,a2),d4
 
 	cmp.w	#GD__memorytype,d4
 	bne.b	.nextbutton1
@@ -46696,9 +46678,6 @@ ReinitStuff:
 	movem.l	(sp)+,d0-d7/a0-a6
 	bra	OpenConDevice
 
-C1DF8A:
-	rts
-
 OpenScreenOnePlane:
 	move.w	#1,(Scr_NrPlanes-DT,a4)
 ;	bset	#0,(PR_OnePlane).l
@@ -46874,6 +46853,7 @@ closewindow:
 	move.l	(IntBase-DT,a4),a6
 	move.l	(MainWindowHandle-DT,a4),a0
 	clr.l	(MainWindowHandle-DT,a4)
+	clr.l	(KEY_PORT-DT,a4)
 	jmp	(_LVOCloseWindow,a6)
 
 
@@ -47083,11 +47063,10 @@ OpenConDevice:
 	moveq	#0,d1		; flags
 	jsr	(_LVOOpenDevice,a6)
 	tst.l	d0
-	bne.b	C17AB8
+	bne.b	.Error
 	move.l	(MainWindowHandle-DT,a4),a0
 	move.l	(wd_UserPort,a0),(KEY_PORT-DT,a4)
-C17AB8:
-	rts
+.Error	rts
 
 CloseConDevice:
 	move.l	(4).w,a6
@@ -47139,6 +47118,19 @@ OpenLibsAndInitUI:
 
 
 CloseUIAndLibs:
+	move.l	(DosBase-DT,a4),a6
+	move.l	(PrinterBase-DT,a4),d1
+	beq.b	.NoPrinter
+	jsr	(_LVOClose,a6)
+.NoPrinter
+	lea	(DIR_ARRAY+DSIZE*10-DT,a4),a0
+	move.l	a0,d1
+	moveq	#ACCESS_READ,d2
+	jsr	(_LVOLock,a6)
+	move.l	d0,d1
+	beq.b	.NoLock
+	jsr	(_LVOCurrentDir,a6)
+.NoLock
 	bsr	CloseConDevice
 	bsr	FreeAllMenus
 	bsr	closewindow
@@ -47146,7 +47138,6 @@ CloseUIAndLibs:
 	bsr	close_edit_font
 
 	move.l	(4).w,a6
-
 	lea	(DATA_REPLYPORT-DT,a4),a1
 	jsr	(_LVORemPort,a6)
 
@@ -47170,29 +47161,11 @@ CloseUIAndLibs:
 	move.l	d0,a1
 	jsr	(_LVOCloseLibrary,a6)
 .NoAsl
-
 	move.l	(IntBase-DT,a4),a1
 	jsr	(_LVOCloseLibrary,a6)
-
 	move.l	(GfxBase-DT,a4),a1
 	jsr	(_LVOCloseLibrary,a6)
-
-	move.l	(DosBase-DT,a4),a6
-	move.l	(PrinterBase-DT,a4),d1
-	beq.b	.NoPrinter
-	jsr	(_LVOClose,a6)
-.NoPrinter
-
-	lea	(DIR_ARRAY+DSIZE*10-DT,a4),a0
-	move.l	a0,d1
-	moveq	#ACCESS_READ,d2
-	jsr	(_LVOLock,a6)
-	move.l	d0,d1
-	beq.b	.NoLock
-	jsr	(_LVOCurrentDir,a6)
-.NoLock
-	move.l	a6,a1
-	move.l	(4).w,a6
+	move.l	(DosBase-DT,a4),a1
 	jmp	(_LVOCloseLibrary,a6)
 
 
@@ -48521,9 +48494,12 @@ Change_2menu_d0:
 	move.l	(sp)+,a1
 	move.l	a1,(MenuStrip-DT,a4)
 	jsr	(_LVOSetMenuStrip,a6)
+	tst.l	(KEY_PORT-DT,a4)
+	beq.b	.NoPort
 	st	(MenuStripChanged-DT,a4)
 	jsr	(messages_get)			; discard old menu msgs
 	sf	(MenuStripChanged-DT,a4)
+.NoPort
 	movem.l	(sp)+,d0-d7/a0-a6
 	rts
 
@@ -49437,7 +49413,6 @@ PrefsProcesMsg:
 	move.l	(PR_GTIMsg-DT,a4),a1
 	move.l	(GadToolsBase-DT,a4),a6
 	jsr	(_LVOGT_ReplyIMsg,a6)
-	clr.l	(PR_GTIMsg-DT,a4)
 .anderwindow:
 	bra.b	PrefsProcesMsg
 
@@ -49446,8 +49421,7 @@ PrefsProcesMsg:
 	rts
 
 Prefs_CheckoutMsg:
-	move.l	d0,a0
-	cmp.l	#IDCMP_REFRESHWINDOW,(20,a0)	;class
+	cmp.l	#IDCMP_REFRESHWINDOW,(im_Class,a0)
 	bne.b	.C23E5A
 	move.l	(PrefsAsmWinBase-DT,a4),a0
 	move.l	(GadToolsBase-DT,a4),a6
@@ -49457,9 +49431,9 @@ Prefs_CheckoutMsg:
 	jmp	(_LVOGT_EndRefresh,a6)		; ***
 
 .C23E5A
-	cmp.l	#IDCMP_MENUPICK,(20,a0)
+	cmp.l	#IDCMP_MENUPICK,(im_Class,a0)
 	beq.w	PR_menuCheck
-	cmp.l	#IDCMP_GADGETUP,(20,a0)
+	cmp.l	#IDCMP_GADGETUP,(im_Class,a0)
 	bne.b	.C23E88
 	tst.b	(Prefs_tiepe-DT,a4)
 	beq.w	Prefs_checkbuttons_Env
@@ -54058,6 +54032,8 @@ Disasm_END:		; section end
 
 	SECTION	AsmPrors01C188,DATA	; data+bss
 
+DATA_START:
+
 Error_Msg_Table:
 	dr.w	AddressRegByt.MSG
 	dr.w	AddressRegExp.MSG
@@ -54415,6 +54391,7 @@ ReqToolsName:		dc.b	'reqtools.library',0
 
 SyntColors.MSG:		dc.b	'Syntax Colors',0
 SYNTLEV.MSG		dc.b	'Level',0
+AsmPro.MSG:		DC.B	'Asm-Pro',0
 
 	cnop	0,4
 ScreenTagList:

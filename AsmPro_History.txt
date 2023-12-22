@@ -8,13 +8,24 @@ Known bugs:
 
 * Multiple cursors in monitors.
 * More editing stuff in menu strip (like with search).
-* Bitoperators with displacement/index don't work (BFxxx)
 * problems with some amiga configs strange cursor/scroll behaviour.
 * Enforcer hits on exit of Asm-pro (only on 060 I do not get any on my 040)
 
 
 Check homapage for more info:
 http://asmpro.surf.to
+
+================= Asm-Pro V1.20b (22-Dec-2023) ======================
+People contributing to this opensource release:
+- amigo/binary (amigo@binary.si)
+
+[ BUGFIXES ]
+01. UI-1.20: Bugfix #26 (multiple hotkeys) causes crash on some systems.
+02. 1.19: System crash on exit if default directory (set in the general
+    preferences) does not exist.
+03. UI: Gadget messages in the startup window are used after a reply.
+04. ASM: Include jam problem resolved, caching now uses valid paths which
+    elimates eventual double caching and jams due to pass1/2 differences.
 
 ================= Asm-Pro V1.20 (17-Dec-2023) =======================
 People contributing to this opensource release:
